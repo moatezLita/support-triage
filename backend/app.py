@@ -2,6 +2,8 @@ from flask import Flask, request, jsonify
 import groq
 import os
 import logging
+import datetime
+import uuid
 from functools import lru_cache
 
 # Configure logging to reduce disk I/O
@@ -11,6 +13,14 @@ logging.basicConfig(
 )
 
 app = Flask(__name__)
+
+# Enable CORS
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE')
+    return response
 
 # Initialize Groq client (only when needed to save resources)
 def get_groq_client():
@@ -110,6 +120,8 @@ def generate_response():
             return jsonify({"error": "No message provided"}), 400
             
         category = data.get('category', 'general-inquiry')
+        email = data.get('email', '')
+        urgency = data.get('urgency', 'medium')  # Get urgency from request or default to medium
         
         # Call Groq API with Mistral model for response generation
         client = get_groq_client()
@@ -124,9 +136,38 @@ def generate_response():
         
         generated_response = response.choices[0].message.content
         
-        return jsonify({
-            "response_text": generated_response
-        })
+        # Generate a ticket ID and number
+        ticket_id = f"AUT-{uuid.uuid4().int % 100}"
+        ticket_number = str(10000 + (uuid.uuid4().int % 1000))
+        
+        # Format the response according to the n8n output structure
+        formatted_response = {
+            "success": True,
+            "message": "Thank you for your message. We've analyzed your request.",
+            "details": {
+                "category": category.replace('-', ' ').title(),
+                "urgency": urgency,
+                "ticketInfo": {
+                    "created": True,
+                    "ticketId": ticket_id,
+                    "ticketNumber": ticket_number,
+                    "status": "Open"
+                },
+                "nextSteps": f"Our support team will address your {category.replace('-', ' ')} issue urgently. Please reference ticket {ticket_id} in any further communication.",
+                "notifications": {
+                    "email": False,
+                    "slack": True
+                }
+            },
+            "metadata": {
+                "timestamp": datetime.datetime.now().isoformat(),
+                "requestId": f"req-{uuid.uuid4().int % 1000000}",
+                "aiProcessed": True,
+                "autoResponded": False
+            }
+        }
+        
+        return jsonify(formatted_response)
     except Exception as e:
         logging.error(f"Error generating response: {str(e)}")
         return jsonify({"error": str(e)}), 500
